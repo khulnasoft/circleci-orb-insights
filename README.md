@@ -21,9 +21,6 @@ The Insights Orb is an easy way to get started creating free, automated vulnerab
 ### 2. Create a context in the CircleCi portal and assign the required variables
     Navigate to Org Settings > Context and create a context
 
-<p align="left">
-  <img alt="Create a context" src="https://github.com/khulnasoft/circleci-orb-insights/blob/master/images/context1.png">
-</p>
 
 ### 3. Within your new context create an environment variable named "KHULNASOFT_TOKEN" and populate it with the token from step #1
 
@@ -101,7 +98,3 @@ workflows:
 By default the Insights will pass a `0` for a passing scan (that is, a scan that has no high ranking vulnerabilities) and a `4` for a failing scan. This `4` of course stops the CircleCi process.
 
 A report is created upon a failed scan. This is linked to within the CircleCi as an artifact. Navigate to the artifact tab in the CircleCi dashboard for viewing this report.
-
-<p align="left">
-  <img alt="View Scan Results" src="https://github.com/khulnasoft/circleci-orb-insights/blob/master/images/scanReport.png">
-</p>
