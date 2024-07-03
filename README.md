@@ -24,9 +24,6 @@ The Insights Orb is an easy way to get started creating free, automated vulnerab
 
 ### 3. Within your new context create an environment variable named "KHULNASOFT_TOKEN" and populate it with the token from step #1
 
-<p align="left">
-  <img alt="Add the KHULNASOFT_TOKEN environment variable" src="https://github.com/khulnasoft/circleci-orb-insights/blob/master/images/contextEnvVar.png">
-</p>
 
 ### 4. Add the required configuration to your build configuration
 
