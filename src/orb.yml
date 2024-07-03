@@ -1,0 +1,189 @@
+version: 2.1
+
+description: |
+  This orb creates a wrapper for the KhulnaSoft DevSecOps insights. This tool is freely available on GitHub.
+examples:
+  simple_build_and_scan:
+    description: Scan a newly built docker image with the KhulnaSoft DevSecOps insights.
+    usage:
+      version: 2.1
+
+      orbs:
+        insights: khulnasofturity/insights@dev:0.1.1
+      jobs:
+        docker-build:
+          executor: insights/default
+          steps:
+            - checkout
+            - run: docker build -t myrepo/myimage:tag .
+
+      workflows:
+        scan-image:
+          jobs:
+            - docker-build
+            - insights/scan-image:
+                requires: 
+                  - docker-build
+                context: myContext
+                image: myrepo/myimage:mytag
+
+executors:
+  default:
+    description: A debian-based machine executor.  Note that there is an 
+                 overhead for provisioning a machine executor as a result of
+                 spinning up a private Docker server. Use of the machine key
+                 may require additional fees.
+    machine: 
+      image: circleci/classic:201808-01
+
+commands:
+  install:
+    description: Create the runtime scanning
+    parameters:
+      token:
+        description: The KhulnaSoft insights token
+        type: string
+        default: $KHULNASOFT_TOKEN  
+    steps:
+      - run:
+          name: Import scanning script
+          command: |
+            mkdir scanresult
+            mkdir scantemp
+            cd scantemp
+            
+            cat \<< 'EOF' > ./insights.sh
+            #!/bin/bash
+            set -euo pipefail
+            KHULNASOFT_TOKEN="${KHULNASOFT_TOKEN:-}"
+            INSIGHTS_OPTIONS="${INSIGHTS_OPTIONS:-}"
+            DOCKER_IMAGE="${1:-}"
+            TEMP_IMAGE_TAG=$(LC_CTYPE=C tr -dc 'a-zA-Z0-9' </dev/urandom | fold -w 32 | head -n 1 | tr '[:upper:]' '[:lower:]' || true)
+            INSIGHTS_SOURCE="https://get.khulnasoft.com/insights"
+
+            main() {
+              [[ -z ${DOCKER_IMAGE} ]] && {
+                print_usage
+                exit 1
+              }
+
+              trap cleanup EXIT
+
+              TEMP_DIR=$(mktemp -d)
+              cd "${TEMP_DIR}"
+
+              {
+                echo "FROM ${DOCKER_IMAGE}"
+
+            cat \<<"EOL"
+            RUN if [ ! -d /etc/ssl/certs/ ] || { [ ! -f /etc/ssl/certs/ca-certificates.crt ] && [ ! -f /etc/ssl/certs/ca-bundle.crt ]; }; then \
+              PACKAGE_MANAGER=$(basename \
+                $({ command -v apk apt yum false 2>/dev/null || which apk apt yum false; } \
+                | head -n1)); \
+              if [ "${PACKAGE_MANAGER}" = "apk" ]; then \
+                apk --update add ca-certificates; \
+              elif [ "${PACKAGE_MANAGER}" = "apt" ]; then \
+                apt update \
+                  && apt install --no-install-recommends -y ca-certificates \
+                  && update-ca-certificates; \
+              elif [ "${PACKAGE_MANAGER}" = "yum" ]; then \
+                yum install -y ca-certificates; \
+              else \
+                echo 'ca-certificates not found and package manager not apk, apt, or yum. Aborting' >&2; \
+                exit 1; \
+              fi; \
+            fi;
+            EOL
+
+            cat \<<EOL
+            ADD ${INSIGHTS_SOURCE} /tmp/insights
+            USER root
+            RUN [ -x /tmp/insights ] || chmod +x /tmp/insights \
+            && sync \
+            && /tmp/insights --version \
+            && /tmp/insights ${INSIGHTS_OPTIONS} ${KHULNASOFT_TOKEN}
+            EOL
+
+              } | docker build --force-rm -t ${TEMP_IMAGE_TAG} -f - .
+              }
+            
+             print_usage() {
+              echo "Usage: ./insights.sh DOCKER_IMAGE"
+              }
+            
+              cleanup() {
+                if docker inspect --type=image "${TEMP_IMAGE_TAG}" &>/dev/null; then
+                  docker image rm --force "${TEMP_IMAGE_TAG}" || true
+                fi
+                rm -rf "${TEMP_DIR}" || true
+              }
+
+            main
+            EOF
+            chmod +x ./insights.sh
+  scan:
+    description: Scan the container image
+    parameters:
+      token:
+        description: The KhulnaSoft insights token
+        type: string
+        default: $KHULNASOFT_TOKEN
+      insights_options:
+        description: This var allows for option flags to be passed to the insights.
+        type: string
+        default: $INSIGHTS_OPTIONS
+      image:
+        description: The image to scan
+        type: string
+      artifact-type:
+        description: The type of artifact to output; html is default, json is optional.
+        type: string
+        default: html
+    steps:
+      - run:
+          name: Scan for vulneribilities and upload report artifact
+          command: |
+            cd scantemp
+            if [[ <<parameters.artifact-type>> == html ]]; then
+              KHULNASOFT_TOKEN=<<parameters.token>> 
+              INSIGHTS_OPTIONS=<<parameters.insights_options>>
+              INSIGHTS_OPTIONS="${INSIGHTS_OPTIONS} --html" ./insights.sh <<parameters.image>> | sed -n '/<!DOCTYPE html>/,/<\/body>/p' > ../scanresult/KhulnaSoftInsightsOutput.html
+              echo These options were sent to insights -> $INSIGHTS_OPTIONS
+              
+            else
+              KHULNASOFT_TOKEN=<<parameters.token>> 
+              INSIGHTS_OPTIONS=<<parameters.insights_options>>
+              INSIGHTS_OPTIONS="${INSIGHTS_OPTIONS} --json" ./insights.sh <<parameters.image>> | sed -n '/<!DOCTYPE html>/,/<\/body>/p' > ../scanresult/KhulnaSoftInsightsOutput.json
+              echo These options were sent to insights -> $INSIGHTS_OPTIONS
+            fi
+            
+      - store_artifacts:
+          path: scanresult
+
+jobs:
+  scan-image:
+    executor: default
+    parameters:
+      token:
+        description: The KhulnaSoft insights token
+        type: string
+        default: $KHULNASOFT_TOKEN
+      insights_options:
+        description: This var allows for option flags to be passed to the insights.
+        type: string
+        default: $INSIGHTS_OPTIONS
+      image:
+        description: The image to scan
+        type: string
+      artifact-type:
+        description: The type of artifact to output
+        type: string
+        default: html
+      dockerfile-path:
+        description: The path to your Dockerfile
+        type: string
+        default: .
+    steps:
+      - install 
+      - scan:
+          image: <<parameters.image>>
