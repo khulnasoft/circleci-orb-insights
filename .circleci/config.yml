@@ -1,0 +1,25 @@
+# CircleCI build config example for testing implementing the 
+# KhulnaSoft DevSecOps Insights
+
+version: 2.1
+
+orbs:
+  insights: khulnasoft/insights@dev:0.1.1
+
+
+jobs:
+  build-and-scan:
+    executor: insights/default
+    steps:
+      - checkout
+      - run: docker build -t build/test:latest .
+      - insights/install
+      - insights/scan:
+          image: build/test:latest
+          insights_options: "--continue-on-failure"
+
+workflows:
+  scan-image:
+    jobs:
+      - build-and-scan:
+          context: insights
